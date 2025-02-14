@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 
 import torch
-from math_verify import parse, verify
+from math_verify import ExprExtractionConfig, LatexExtractionConfig, StringExtractionConfig, parse, verify
 
 LOG_PATH = os.environ.get("REWARD_LOG_PATH", "reward.log")
 
@@ -18,7 +18,14 @@ def accuracy_reward_func(completion, answer):
         reward = 1.0
     else:
         try:
-            if float(verify(parse(completion), parse(answer))) > 0:
+            answer = parse(
+                answer, extraction_config=[StringExtractionConfig(), LatexExtractionConfig(), ExprExtractionConfig()]
+            )
+            completion = parse(
+                completion,
+                extraction_config=[StringExtractionConfig(), LatexExtractionConfig(), ExprExtractionConfig()],
+            )
+            if verify(answer, completion):
                 reward = 1.0
         except:
             pass
