@@ -9,8 +9,8 @@ LOG_PATH = os.environ.get("REWARD_LOG_PATH", "reward.log")
 
 
 def accuracy_reward_func(completion, answer):
-    completion_match = re.search(r"<answer>(.*?)</answer>", completion, re.DOTALL)
-    completion = completion_match.group(1).strip() if completion_match else completion.strip()
+    completion_match = re.search(r"\\boxed\{(.*?)\}\s*$", completion, re.DOTALL)
+    completion = completion_match.group(0).strip() if completion_match else completion.strip()
 
     reward = 0.0
 
@@ -27,7 +27,14 @@ def accuracy_reward_func(completion, answer):
 
 
 def format_reward_func(completion):
-    pattern = r"^<think>.*?</think>\s*<answer>.*?</answer>$"
+    pattern = (
+        r"^(?=(?:.*<think>){1})(?=(?:.*<\/think>){1})"
+        r"(?!.*<think>.*<think>)"
+        r"(?!.*<\/think>.*<\/think>)"
+        r"<think>.*?</think>"
+        r".*\\boxed\{.*\}\s*$"
+    )
+    # pattern = r"^<think>.*?</think>(?:(?!<\/?think>).)*\\boxed\{.*\}\s*$"
     matches = re.search(pattern, completion, re.DOTALL)
     return 1.0 if matches else 0.0
 
