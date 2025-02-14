@@ -12,7 +12,7 @@ from openrlhf.internvl import InternVLChatModel
 from openrlhf.internvl.train.constants import IMG_CONTEXT_TOKEN
 
 from .ring_attn_utils import convert_ring_attn_params
-from .utils import log_probs_from_logits, reset_position_ids
+from .utils import freeze_params, log_probs_from_logits, reset_position_ids
 
 
 class Actor(nn.Module):
@@ -82,6 +82,7 @@ class Actor(nn.Module):
                 torch_dtype=torch.bfloat16 if bf16 else "auto",
                 device_map=device_map,
             )
+            freeze_params(self.model.vision_model)
             tokenizer = AutoTokenizer.from_pretrained(pretrain_or_model, trust_remote_code=True)
             self.model.img_context_token_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
 

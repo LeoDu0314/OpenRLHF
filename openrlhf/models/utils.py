@@ -130,3 +130,8 @@ def unpacking_samples(values: torch.Tensor, packed_seqlens: list[int]):
         unpacked_values.append(values[offset : offset + seqlen])
         offset += seqlen
     return unpacked_values
+
+
+def freeze_params(module):
+    for param in module.parameters():
+        param.requires_grad = False

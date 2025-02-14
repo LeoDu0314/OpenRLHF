@@ -42,7 +42,7 @@ def format_reward_func(completion):
         r"^(?=(?:.*<think>){1})(?=(?:.*<\/think>){1})"
         r"(?!.*<think>.*<think>)"
         r"(?!.*<\/think>.*<\/think>)"
-        r".*<think>.*?</think>.*$"
+        r"<think>.+?</think>.+$"
     )
     matches = re.search(pattern, completion, re.DOTALL)
     return 1.0 if matches else 0.0
