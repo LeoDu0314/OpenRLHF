@@ -159,7 +159,6 @@ class NaiveExperienceMaker(ABC):
 
         # custom reward func for reinforced finetuning
         self.custom_reward_func = None
-
         if remote_rm_url and remote_rm_url[0].endswith(".py"):
             print(f"Loading custom `reward_func(queries, prompts)` from {remote_rm_url[0]}")
             import importlib.util
@@ -238,7 +237,7 @@ class NaiveExperienceMaker(ABC):
                     generate_kwargs["gamma"],
                     generate_kwargs["lambd"],
                 )
-            elif self.advantage_estimator in ["reinforce", "rloo"]:
+            elif self.advantage_estimator in ["reinforce", "rloo", "reinforce_baseline"]:
                 experience.returns = self.get_cumulative_returns(
                     reward,
                     experience.action_mask,
@@ -297,7 +296,8 @@ class NaiveExperienceMaker(ABC):
         Turn samples into experience by calculating logprobs, values, rewards, and kl divergence.
         """
         self.actor.eval()
-        self.initial_model.eval()
+        if self.initial_model is not None:
+            self.initial_model.eval()
         if self.reward_model is not None:
             self.reward_model.eval()
         if self.critic is not None:
@@ -313,7 +313,10 @@ class NaiveExperienceMaker(ABC):
         action_log_probs = self.actor(sequences, num_actions, attention_mask)
 
         # init log probs
-        base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask)
+        if self.initial_model is not None:
+            base_action_log_probs = self.initial_model(sequences, num_actions, attention_mask)
+        else:
+            base_action_log_probs = None
 
         # values
         if self.critic is not None:
@@ -335,12 +338,15 @@ class NaiveExperienceMaker(ABC):
             # local RM
             r = self.reward_model(sequences, attention_mask)
 
-        kl = compute_approx_kl(
-            action_log_probs,
-            base_action_log_probs,
-            action_mask=action_mask,
-            use_kl_estimator_k3=self.strategy.args.use_kl_estimator_k3,
-        )
+        if self.initial_model is not None:
+            kl = compute_approx_kl(
+                action_log_probs,
+                base_action_log_probs,
+                action_mask=action_mask,
+                use_kl_estimator_k3=self.strategy.args.use_kl_estimator_k3,
+            )
+        else:
+            kl = torch.zeros_like(action_log_probs, dtype=action_log_probs.dtype, device=action_log_probs.device)
 
         info = {
             "kl": masked_mean(kl, action_mask, dim=-1),
@@ -376,7 +382,7 @@ class NaiveExperienceMaker(ABC):
         - rewards: List of rewards
         """
         args = self.strategy.args
-        # reward shaping for RLOO
+        # reward shaping for rloo and reinforce_baseline
         if args.advantage_estimator == "rloo":
             rewards = torch.cat([experience.info["reward"] for experience in experiences])
             rewards = rewards.reshape(-1, args.n_samples_per_prompt).to(device="cuda")
@@ -384,6 +390,15 @@ class NaiveExperienceMaker(ABC):
             rewards = rewards - baseline
             rewards = rewards.flatten().to(device="cpu").chunk(len(experiences))
             return experiences, rewards
+        elif args.advantage_estimator == "reinforce_baseline":
+            # REINFORCE++-baseline removed the / std and K3 kl loss in GRPO.
+            # `/ std` is not needed in RL variance reduction theory, and `k3 KL` has a larger variance than `k1 KL` under a categorical distribution.
+            rewards = torch.cat([experience.info["reward"] for experience in experiences])
+            rewards = rewards.reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+            rewards = rewards - rewards.mean(-1, keepdim=True)
+            rewards = rewards.reshape(-1).to(device="cpu").chunk(len(experiences))
+            return experiences, rewards
+
         # default rewards
         return experiences, [experience.info["reward"] for experience in experiences]
 
@@ -571,18 +586,21 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
         )
 
         # init log probs
-        base_action_log_probs_ref = self.initial_model.forward.remote(
-            sequences_cpu,
-            pixel_values_cpu,
-            image_flags_cpu,
-            num_actions,
-            attention_mask_cpu,
-            packed_seq_lens=packed_seq_lens,
-        )
+        if self.initial_model is not None:
+            base_action_log_probs_ref = self.initial_model.forward.remote(
+                sequences_cpu,
+                pixel_values_cpu,
+                image_flags_cpu,
+                num_actions,
+                attention_mask_cpu,
+                packed_seq_lens=packed_seq_lens,
+            )
 
-        if args.colocate_all_models:
-            ray.get([base_action_log_probs_ref])
-            ray.get([self.initial_model.empty_cache.remote()])
+            if args.colocate_actor_ref or args.colocate_all_models:
+                ray.get([base_action_log_probs_ref])
+                ray.get([self.initial_model.empty_cache.remote()])
+        else:
+            base_action_log_probs_ref = ray.put(None)
 
         # values
         assert self.critic is None
@@ -601,10 +619,6 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                 ray.get([self.critic.empty_cache.remote()])
         else:
             value_ref = ray.put(None)
-
-        if args.colocate_actor_ref:
-            ray.get([base_action_log_probs_ref])
-            ray.get([self.initial_model.empty_cache.remote()])
 
         # rewards
         r_refs = []
@@ -650,7 +664,8 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
         wait_time = time.time() - start
 
         base_action_log_probs, value, rewards = ref_values[0], ref_values[1], ref_values[2:]
-        base_action_log_probs = base_action_log_probs.to(device)
+        if base_action_log_probs is not None:
+            base_action_log_probs = base_action_log_probs.to(device)
         if value is not None:
             value = value.to(device)
         rewards = [r.to(device) for r in rewards]
@@ -663,12 +678,15 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
         if args.colocate_actor_ref or args.colocate_all_models:
             torch.cuda.empty_cache()
 
-        kl = compute_approx_kl(
-            action_log_probs,
-            base_action_log_probs,
-            action_mask=action_mask,
-            use_kl_estimator_k3=args.use_kl_estimator_k3,
-        )
+        if self.initial_model is not None:
+            kl = compute_approx_kl(
+                action_log_probs,
+                base_action_log_probs,
+                action_mask=action_mask,
+                use_kl_estimator_k3=args.use_kl_estimator_k3,
+            )
+        else:
+            kl = torch.zeros_like(action_log_probs, dtype=action_log_probs.dtype, device=device)
 
         assert not self.packing_samples
         if not self.packing_samples:

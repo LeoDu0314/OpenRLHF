@@ -57,10 +57,10 @@ def reward_func(queries, prompts):
                 format_reward = 0.0
 
             rewards.append(accuracy_reward + 0.5 * format_reward)
-            f.write(f"===============================================================")
+            f.write(f"===============================================================\n")
             f.write("Query: " + query + "\n")
             f.write("Answer: " + answer + "\n")
             f.write(f"Accuracy Reward: {accuracy_reward}\tFormat Reward: {format_reward}\n\n\n\n")
-            f.write(f"===============================================================")
+            f.write(f"===============================================================\n")
 
     return torch.tensor(rewards, dtype=torch.float32)
