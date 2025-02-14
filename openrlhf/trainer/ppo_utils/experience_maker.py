@@ -668,8 +668,12 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
             base_action_log_probs = base_action_log_probs.to(device)
         if value is not None:
             value = value.to(device)
-        rewards = [r.to(device) for r in rewards]
+        rewards = [r["rewards"].to(device) for r in rewards]
+        accuracy_rewards = [r["accuracy_rewards"].to(device) for r in rewards]
+        format_rewards = [r["format_rewards"].to(device) for r in rewards]
         r = self.reward_fn(rewards) if len(rewards) > 0 else rewards[0]
+        acc_r = self.reward_fn(accuracy_rewards) if len(accuracy_rewards) > 0 else accuracy_rewards[0]
+        format_r = self.reward_fn(format_rewards) if len(format_rewards) > 0 else format_rewards[0]
 
         # avoid CUDA OOM when colocate models
         if args.colocate_critic_reward and not self.remote_rm_url:
@@ -706,6 +710,8 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
         info = {
             "kl": kl_mean,
             "reward": r,
+            "accuracy_reward": acc_r,
+            "format_reward": format_r,
             "response_length": samples.response_length,
             "total_length": samples.total_length,
             "num_actions": num_actions,

@@ -53,6 +53,8 @@ def reward_func(queries, prompts):
 
     current_time = datetime.now().strftime("%d-%H-%M-%S-%f")
     rewards = []
+    accuracy_rewards = []
+    format_rewards = []
     pattern = r"<\|im_start\|> assistant(.*?)<\|im_end\|>"
 
     with open(LOG_PATH, "a") as f:
@@ -68,6 +70,8 @@ def reward_func(queries, prompts):
             format_reward = format_reward_func(response)
 
             rewards.append(accuracy_reward + 0.5 * format_reward)
+            accuracy_rewards.append(accuracy_reward)
+            format_rewards.append(format_reward)
             f.write(f"===============================================================\n")
             f.write("Query: " + query + "\n")
             f.write("Completion Match: " + str(completion_match) + "\n")
@@ -75,4 +79,8 @@ def reward_func(queries, prompts):
             f.write(f"Accuracy Reward: {accuracy_reward}\tFormat Reward: {format_reward}\n\n\n\n")
             f.write(f"===============================================================\n")
 
-    return torch.tensor(rewards, dtype=torch.float32)
+    return {
+        "rewards": torch.tensor(rewards, dtype=torch.float32),
+        "accuracy_rewards": torch.tensor(accuracy_rewards, dtype=torch.float32),
+        "format_rewards": torch.tensor(format_rewards, dtype=torch.float32),
+    }
