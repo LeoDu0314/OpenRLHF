@@ -2,6 +2,7 @@ import os
 import re
 from datetime import datetime
 
+import regex
 import torch
 from math_verify import ExprExtractionConfig, LatexExtractionConfig, StringExtractionConfig, parse, verify
 
@@ -9,8 +10,11 @@ LOG_PATH = os.environ.get("REWARD_LOG_PATH", "reward.log")
 
 
 def accuracy_reward_func(completion, answer):
-    completion_match = re.search(r"\\boxed\{(.*?)\}\s*$", completion, re.DOTALL)
-    completion = completion_match.group(0).strip() if completion_match else completion.strip()
+    completion = completion.split("\n")[-1]
+    completion_match = regex.findall(
+        r"(\\boxed\{(?:[^{}]+|(?P<BRACES>\{(?:[^{}]+|(?P>BRACES))*\}))*\})", completion, re.DOTALL
+    )
+    completion = completion_match[-1][0].strip() if completion_match else completion.strip()
 
     reward = 0.0
 
@@ -30,7 +34,7 @@ def accuracy_reward_func(completion, answer):
         except:
             pass
 
-    return reward
+    return reward, completion_match
 
 
 def format_reward_func(completion):
@@ -38,10 +42,8 @@ def format_reward_func(completion):
         r"^(?=(?:.*<think>){1})(?=(?:.*<\/think>){1})"
         r"(?!.*<think>.*<think>)"
         r"(?!.*<\/think>.*<\/think>)"
-        r"<think>.*?</think>"
-        r".*\\boxed\{.*\}\s*$"
+        r".*<think>.*?</think>.*$"
     )
-    # pattern = r"^<think>.*?</think>(?:(?!<\/?think>).)*\\boxed\{.*\}\s*$"
     matches = re.search(pattern, completion, re.DOTALL)
     return 1.0 if matches else 0.0
 
@@ -59,20 +61,16 @@ def reward_func(queries, prompts):
             query = re.sub(r"\s*<IMG_CONTEXT>\s*", "", query)
             query = re.sub(r"<img>\s*</img>", " <image>", query)
             query = re.sub("</s>", "", query)
-            try:
-                response = re.search(pattern, query, re.DOTALL).group(1).strip()
-                answer = prompt["answer"]
+            response = re.search(pattern, query, re.DOTALL).group(1).strip()
+            answer = prompt["answer"]
 
-                accuracy_reward = accuracy_reward_func(response, answer)
-                format_reward = format_reward_func(response)
-            except Exception as e:
-                print(e)
-                accuracy_reward = 0.0
-                format_reward = 0.0
+            accuracy_reward, completion_match = accuracy_reward_func(response, answer)
+            format_reward = format_reward_func(response)
 
             rewards.append(accuracy_reward + 0.5 * format_reward)
             f.write(f"===============================================================\n")
             f.write("Query: " + query + "\n")
+            f.write("Completion Match: " + str(completion_match) + "\n")
             f.write("Answer: " + answer + "\n")
             f.write(f"Accuracy Reward: {accuracy_reward}\tFormat Reward: {format_reward}\n\n\n\n")
             f.write(f"===============================================================\n")
