@@ -10,7 +10,7 @@ LOG_PATH = os.environ.get("REWARD_LOG_PATH", "reward.log")
 
 
 def accuracy_reward_func(completion, answer):
-    completion = completion.split("\n")[-1]
+    # completion = completion.split("\n")[-1]
     completion_match = regex.findall(
         r"(\\boxed\{(?:[^{}]+|(?P<BRACES>\{(?:[^{}]+|(?P>BRACES))*\}))*\})", completion, re.DOTALL
     )
