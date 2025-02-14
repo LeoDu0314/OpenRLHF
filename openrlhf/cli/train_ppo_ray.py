@@ -112,6 +112,7 @@ def train(args):
     if not args.colocate_all_models:
         pg = None
 
+    assert args.critic_pretrain is None
     # if colocated, create placement group for critic and reward model explicitly.
     if args.critic_pretrain and args.colocate_critic_reward:
         assert (
@@ -123,6 +124,7 @@ def train(args):
         pg = placement_group(bundles, strategy="PACK")
         ray.get(pg.ready())
 
+    assert args.critic_pretrain is None
     if args.critic_pretrain:
         critic_model = PPORayActorGroup(
             args.critic_num_nodes,
@@ -161,6 +163,7 @@ def train(args):
 
     ray.get(refs)
 
+    assert args.critic_pretrain is None
     if args.critic_pretrain:
         # critic scheduler initialization depends on max_step, so we have to init critic after actor
         # TODO: use first reward model as critic model
@@ -177,6 +180,7 @@ def train(args):
     # save model
     ray.get(actor_model.async_save_model())
 
+    assert args.critic_pretrain is None
     if args.critic_pretrain and args.save_value_network:
         ray.get(critic_model.async_save_model())
 

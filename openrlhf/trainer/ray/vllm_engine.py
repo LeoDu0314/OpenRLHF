@@ -63,11 +63,11 @@ class LLMRayActor:
     def wake_up(self):
         self.llm.wake_up()
 
-    def add_requests(self, actor_rank, *, sampling_params, prompt_token_ids):
+    def add_requests(self, actor_rank, *, sampling_params, prompt_inputs):
         """
         Save the requests from actors and generate responses when all actors have sent their requests
         """
-        self.requests[actor_rank] = prompt_token_ids
+        self.requests[actor_rank] = prompt_inputs
         self.actor_counter += 1
         if self.actor_counter == self.num_actors:
             assert len(self.requests) == self.num_actors
@@ -79,7 +79,21 @@ class LLMRayActor:
 
             if len(requests) > 0:
                 # For now we assume that all requests have the same sampling params
-                responses = self.llm.generate(sampling_params=sampling_params, prompt_token_ids=requests)
+                responses = self.llm.generate(sampling_params=sampling_params, prompts=requests)
+                mm_inputs = [
+                    self.llm.llm_engine.input_processor(
+                        self.llm.llm_engine.input_preprocessor.preprocess(request, request_id="-1")
+                    )
+                    for request in requests
+                ]
+                responses = [
+                    {
+                        "response": response,
+                        "pixel_values": mm_input["mm_kwargs"]["pixel_values_flat"],
+                        "image_num_patches": mm_input["mm_kwargs"]["image_num_patches"].sum(),
+                    }
+                    for response, mm_input in zip(responses, mm_inputs)
+                ]
             else:
                 responses = []
 

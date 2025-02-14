@@ -235,6 +235,7 @@ class PPOTrainer(ABC):
                         output = self.tokenizer.batch_decode(
                             experience.sequences[0].unsqueeze(0), skip_special_tokens=True
                         )
+                        output = [o.replace("<IMG_CONTEXT>", "").replace("<img></img>", "<image>") for o in output]
                         self.strategy.print(output)
                     self.replay_buffer.append(experience)
 
@@ -328,6 +329,7 @@ class PPOTrainer(ABC):
         status = {}
         if global_steps > self.freezing_actor_steps:
             status = self.training_step_actor(experience)
+        assert self.critic is None
         if self.critic is not None:
             status.update(self.training_step_critic(experience))
         return status
@@ -336,6 +338,7 @@ class PPOTrainer(ABC):
         self.actor.train()
 
         # TODO: this is a bad indicator to say that data is packed...
+        assert not isinstance(experience.sequences, list)
         if isinstance(experience.sequences, list):
             sequences = torch.cat(experience.sequences, dim=0).unsqueeze(0)
             old_action_log_probs = torch.cat(experience.action_log_probs, dim=0).unsqueeze(0)
@@ -347,15 +350,19 @@ class PPOTrainer(ABC):
             ).unsqueeze(0)
         else:
             sequences = experience.sequences
+            pixel_values = experience.pixel_values
             old_action_log_probs = experience.action_log_probs
             advantages = experience.advantages
             num_actions = experience.action_mask.size(1)
             packed_seq_lens = None
             attention_mask = experience.attention_mask
+            image_flags = torch.tensor([1] * pixel_values.size(0), dtype=torch.long, device=sequences.device)
 
         # actor loss
         action_log_probs, output = self.actor(
             sequences,
+            pixel_values,
+            image_flags,
             num_actions,
             attention_mask=attention_mask,
             return_output=True,
@@ -377,6 +384,7 @@ class PPOTrainer(ABC):
         loss = actor_loss + aux_loss * self.args.aux_loss_coef
         self.strategy.backward(loss, self.actor, self.actor_optim)
 
+        assert self.pretrain_dataloader is None
         # ptx loss
         if self.pretrain_dataloader is not None:
             data = next(self.pretrain_dataloader)
@@ -407,6 +415,7 @@ class PPOTrainer(ABC):
 
         # status
         status = {"policy_loss": actor_loss.item(), "actor_lr": self.actor_scheduler.get_last_lr()[0]}
+        assert self.pretrain_dataloader is None
         if self.pretrain_dataloader is not None:
             status["ptx_loss"] = ptx_loss.item()
         for k, v in experience.info.items():
@@ -513,6 +522,7 @@ class PPOTrainer(ABC):
                 args.max_ckpt_mem,
                 client_states,
             )
+            assert self.critic is None
             if self.critic is not None:
                 self.strategy.save_ckpt(
                     self.critic, os.path.join(args.ckpt_path, "_critic"), tag, args.max_ckpt_num, args.max_ckpt_mem

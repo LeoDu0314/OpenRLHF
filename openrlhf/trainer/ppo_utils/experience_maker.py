@@ -2,14 +2,14 @@ import time
 from abc import ABC
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import ray
 import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from openrlhf.models.actor import Actor
+from openrlhf.models import Actor
 from openrlhf.models.utils import compute_approx_kl, compute_reward, masked_mean, unpacking_samples
 from openrlhf.utils.logging_utils import init_logger
 from openrlhf.utils.remote_rm_utils import remote_rm_fn, remote_rm_fn_ray
@@ -49,6 +49,8 @@ class Experience:
     """
 
     sequences: torch.Tensor
+    pixel_values: Optional[torch.Tensor]
+    image_num_patches: Optional[torch.Tensor]
     action_log_probs: torch.Tensor
     values: torch.Tensor
     returns: Optional[torch.Tensor]
@@ -61,6 +63,8 @@ class Experience:
     @torch.no_grad()
     def to_device(self, device: torch.device):
         self.sequences = to(self.sequences, device)
+        self.pixel_values = to(self.pixel_values, device)
+        self.image_num_patches = to(self.image_num_patches, device)
         self.action_log_probs = to(self.action_log_probs, device)
         self.returns = to(self.returns, device)
         self.advantages = to(self.advantages, device)
@@ -73,6 +77,8 @@ class Experience:
 
     def pin_memory(self):
         self.sequences = pin_memory(self.sequences)
+        self.pixel_values = pin_memory(self.pixel_values)
+        self.image_num_patches = pin_memory(self.image_num_patches)
         self.action_log_probs = pin_memory(self.action_log_probs)
         self.returns = pin_memory(self.returns)
         self.advantages = pin_memory(self.advantages)
@@ -110,11 +116,13 @@ class Samples:
     sequences: torch.Tensor
     attention_mask: Optional[torch.LongTensor]
     action_mask: Optional[torch.BoolTensor]
+    pixel_values: Optional[torch.Tensor]
+    image_num_patches: Optional[torch.Tensor]
     num_actions: Union[int, torch.Tensor]
     packed_seq_lens: Optional[torch.Tensor]
     response_length: torch.Tensor
     total_length: torch.Tensor
-    prompts: list[str]
+    prompts: List[Dict[str, Any]]
 
 
 class NaiveExperienceMaker(ABC):
@@ -151,6 +159,7 @@ class NaiveExperienceMaker(ABC):
 
         # custom reward func for reinforced finetuning
         self.custom_reward_func = None
+
         if remote_rm_url and remote_rm_url[0].endswith(".py"):
             print(f"Loading custom `reward_func(queries, prompts)` from {remote_rm_url[0]}")
             import importlib.util
@@ -181,7 +190,9 @@ class NaiveExperienceMaker(ABC):
         return {k: v.to(device) for k, v in batch.items()}
 
     @torch.no_grad()
-    def make_experience_list(self, all_prompts: Union[str, List[str]], **generate_kwargs) -> List[Experience]:
+    def make_experience_list(
+        self, all_prompts: Union[Dict[str, Any], List[Dict[str, Any]]], **generate_kwargs
+    ) -> List[Experience]:
         """
         Make a list of experience with the micro_rollout_batch_size.
 
@@ -218,6 +229,7 @@ class NaiveExperienceMaker(ABC):
                 reward_clip_range=args.reward_clip_range,
             )
 
+            assert self.advantage_estimator != "gae"
             if self.advantage_estimator == "gae":
                 experience.advantages, experience.returns = self.get_advantages_and_returns(
                     experience.values,
@@ -236,6 +248,7 @@ class NaiveExperienceMaker(ABC):
             else:
                 raise Exception(f"Unkown advantage_estimator {self.advantage_estimator}")
 
+            assert not getattr(self, "packing_samples", False)
             # calculate the return info.
             if not getattr(self, "packing_samples", False):
                 return_sums = reward.sum(dim=-1)
@@ -251,7 +264,7 @@ class NaiveExperienceMaker(ABC):
         return experiences
 
     @torch.no_grad()
-    def generate_samples(self, all_prompts: List[str], **generate_kwargs) -> List[Samples]:
+    def generate_samples(self, all_prompts: List[Dict[str, Any]], **generate_kwargs) -> List[Samples]:
         """
         Generate samples and return in batches.
         """
@@ -451,7 +464,7 @@ class NaiveExperienceMaker(ABC):
         Output:
         - returns: Tensor of shape (batch_size, response_size)
         """
-
+        assert not isinstance(rewards, list)
         if isinstance(rewards, list):
             # packing samples
             # TODO: this is slow...
@@ -487,7 +500,9 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
             self.custom_reward_func = ray.remote(self.custom_reward_func)
 
     @torch.no_grad()
-    def make_experience_list(self, all_prompts: Union[str, List[str]], **generate_kwargs) -> List[Experience]:
+    def make_experience_list(
+        self, all_prompts: Union[Dict[str, Any], List[Dict[str, Any]]], **generate_kwargs
+    ) -> List[Experience]:
         if self.strategy.args.perf:
             self.perf_stats = {
                 "generate_time": 0,
@@ -495,6 +510,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                 "wait_time": 0,
             }
         experiences = super().make_experience_list(all_prompts, **generate_kwargs)
+        assert self.critic is None
         if self.critic is not None:
             for experience in experiences:
                 # send experience to critic
@@ -504,13 +520,14 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
         return experiences
 
     @torch.no_grad()
-    def generate_samples(self, all_prompts: List[str], **generate_kwargs) -> List[Samples]:
+    def generate_samples(self, all_prompts: List[Dict[str, Any]], **generate_kwargs) -> List[Samples]:
         """
         Generate samples and return in batches.
 
         When not using vllm, we will fallback to the default implementation,
         in which actor will be used to generate samples.
         """
+        assert self.vllm_engines
         if self.vllm_engines is None:
             return super().generate_samples(all_prompts, **generate_kwargs)
 
@@ -537,20 +554,30 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
 
         # extract values from samples
         sequences = samples.sequences
+        image_num_patches = samples.image_num_patches
         attention_mask = samples.attention_mask
         action_mask = samples.action_mask
+        pixel_values = samples.pixel_values
         num_actions = samples.num_actions
         packed_seq_lens = samples.packed_seq_lens
+        image_flags = torch.tensor([1] * pixel_values.size(0), dtype=torch.long, device=sequences.device)
 
         start = time.time()
-        sequences_cpu, attention_mask_cpu = (
+        sequences_cpu, attention_mask_cpu, pixel_values_cpu, image_flags_cpu = (
             sequences.to("cpu"),
             attention_mask.to("cpu"),
+            pixel_values.to("cpu"),
+            image_flags.to("cpu"),
         )
 
         # init log probs
         base_action_log_probs_ref = self.initial_model.forward.remote(
-            sequences_cpu, num_actions, attention_mask_cpu, packed_seq_lens=packed_seq_lens
+            sequences_cpu,
+            pixel_values_cpu,
+            image_flags_cpu,
+            num_actions,
+            attention_mask_cpu,
+            packed_seq_lens=packed_seq_lens,
         )
 
         if args.colocate_all_models:
@@ -558,9 +585,15 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
             ray.get([self.initial_model.empty_cache.remote()])
 
         # values
+        assert self.critic is None
         if self.critic is not None:
             value_ref = self.critic.forward.remote(
-                sequences_cpu, num_actions, attention_mask_cpu, packed_seq_lens=packed_seq_lens
+                sequences_cpu,
+                pixel_values_cpu,
+                image_flags_cpu,
+                num_actions,
+                attention_mask_cpu,
+                packed_seq_lens=packed_seq_lens,
             )
             # avoid CUDA OOM when colocate models
             if args.colocate_critic_reward or args.colocate_all_models:
@@ -581,6 +614,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                 r_refs.append(rm.forward.remote(sequences_cpu, attention_mask_cpu, packed_seq_lens=packed_seq_lens))
         else:
             # remote RM
+            assert not self.packing_samples
             if not self.packing_samples:
                 queries = self.tokenizer.batch_decode(sequences_cpu, skip_special_tokens=False)
             else:
@@ -605,7 +639,9 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
             ray.get([self.reward_model[0].empty_cache.remote()])
 
         # log probs
-        action_log_probs = self.actor(sequences, num_actions, attention_mask, packed_seq_lens=packed_seq_lens)
+        action_log_probs = self.actor(
+            sequences, pixel_values, image_flags, num_actions, attention_mask, packed_seq_lens=packed_seq_lens
+        )
         actor_value_rm_time = time.time() - start
 
         # wait initial/critic/reward model done
@@ -634,6 +670,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
             use_kl_estimator_k3=args.use_kl_estimator_k3,
         )
 
+        assert not self.packing_samples
         if not self.packing_samples:
             kl_mean = masked_mean(kl, action_mask, dim=-1)
         else:
@@ -662,6 +699,8 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
 
         experience = Experience(
             sequences,
+            pixel_values,
+            image_num_patches,
             action_log_probs,
             value,
             None,
@@ -675,8 +714,11 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
         self.actor.train()  # reset model state
         return experience
 
-    def _generate_vllm(self, all_prompts: List[str], **kwargs) -> List[Samples]:
+    def _generate_vllm(self, all_prompts: List[Dict[str, Any]], **kwargs) -> List[Samples]:
         from vllm import SamplingParams
+        from vllm.multimodal.utils import MediaConnector
+
+        connector = MediaConnector(allowed_local_media_path="/")
 
         # round-robin load balance
         rank = torch.distributed.get_rank()
@@ -698,20 +740,30 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
             min_tokens=kwargs.get("min_new_tokens", 1),
             skip_special_tokens=kwargs.get("skip_special_tokens", False),
             include_stop_str_in_output=True,
+            stop_token_ids=[kwargs.get("eos_token_id", self.tokenizer.eos_token_id)],
         )
 
         # Expand prompt list based on the number of samples per prompt
+        all_prompt_inputs = [
+            {
+                "prompt": prompt["prompt"],
+                "multi_modal_data": {
+                    "image": [connector.fetch_image(image_url) for image_url in prompt["image_urls"]]
+                },
+            }
+            for prompt in all_prompts
+        ]
         all_prompts = sum([[prompt] * args.n_samples_per_prompt for prompt in all_prompts], [])
-        all_prompt_token_ids = self.tokenize_fn(all_prompts, self.prompt_max_len, padding=False)["input_ids"]
+        all_prompt_inputs = sum(
+            [[prompt_inputs] * args.n_samples_per_prompt for prompt_inputs in all_prompt_inputs], []
+        )
 
         # Distribute requests to engines and collect responses to outputs
         refs = []
-        batch_size = (len(all_prompt_token_ids) + len(llms) - 1) // len(llms)
+        batch_size = (len(all_prompt_inputs) + len(llms) - 1) // len(llms)
         for i, llm in enumerate(llms):
-            prompt_token_ids = all_prompt_token_ids[i * batch_size : (i + 1) * batch_size]
-            refs.append(
-                llm.add_requests.remote(rank, sampling_params=sampling_params, prompt_token_ids=prompt_token_ids)
-            )
+            prompt_inputs = all_prompt_inputs[i * batch_size : (i + 1) * batch_size]
+            refs.append(llm.add_requests.remote(rank, sampling_params=sampling_params, prompt_inputs=prompt_inputs))
         ray.get(refs)
 
         # Make sure all requests are sent.
@@ -727,6 +779,11 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
         for i in range(0, len(all_outputs), args.micro_rollout_batch_size):
             outputs = all_outputs[i : i + self.strategy.args.micro_rollout_batch_size]
             prompts = all_prompts[i : i + self.strategy.args.micro_rollout_batch_size]
+            for output in outputs:
+                image_num_patches = output["image_num_patches"].tolist()
+                output["image_num_patches"] = (
+                    image_num_patches if isinstance(image_num_patches, list) else [image_num_patches]
+                )
             if not self.packing_samples:
                 # NOTE: concat all outputs to following format:
                 #
@@ -734,37 +791,56 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                 # | token token token token token | token token [EOS] [PAD] |
                 # | [PAD] [PAD] [PAD] token token | token token token [EOS] |
                 # |<---------- prompt ----------->|<-------- answer ------->|
-                max_input_len, max_output_len = 0, 0
+                max_input_len, max_output_len, max_image_num_patches_len = 0, 0, 0
                 for output in outputs:
-                    max_input_len = max(max_input_len, len(output.prompt_token_ids))
-                    max_output_len = max(max_output_len, len(output.outputs[0].token_ids))
+                    max_input_len = max(max_input_len, len(output["response"].prompt_token_ids))
+                    max_output_len = max(max_output_len, len(output["response"].outputs[0].token_ids))
+                    max_image_num_patches_len = max(max_image_num_patches_len, len(output["image_num_patches"]))
 
                 pad_token_id, eos_token_id = self.tokenizer.pad_token_id, self.tokenizer.eos_token_id
                 sequences = []
+                pixel_values = []
+                image_num_patches = []
                 for output in outputs:
                     # left padding input
-                    input_len = len(output.prompt_token_ids)
-                    input_ids = [pad_token_id] * (max_input_len - input_len) + list(output.prompt_token_ids)
+                    input_len = len(output["response"].prompt_token_ids)
+                    input_ids = [pad_token_id] * (max_input_len - input_len) + list(
+                        output["response"].prompt_token_ids
+                    )
 
                     # right padding output
-                    output_len = len(output.outputs[0].token_ids)
-                    output_ids = list(output.outputs[0].token_ids) + [pad_token_id] * (max_output_len - output_len)
+                    output_len = len(output["response"].outputs[0].token_ids)
+                    output_ids = list(output["response"].outputs[0].token_ids) + [pad_token_id] * (
+                        max_output_len - output_len
+                    )
+
+                    # left padding image_num_patches
+                    image_num_patches_len = len(output["image_num_patches"])
+                    num_tiles = [0] * (max_image_num_patches_len - image_num_patches_len) + output["image_num_patches"]
 
                     # concat input and output
                     sequences.append(input_ids + output_ids)
+                    pixel_values.append(output["pixel_values"])
+                    image_num_patches.append(num_tiles)
 
                 sequences = torch.tensor(sequences)
+                pixel_values = torch.cat(pixel_values, dim=0).to(torch.bfloat16)
+                image_num_patches = torch.tensor(image_num_patches, dtype=torch.long)
                 sequences, attention_mask, action_mask = self.actor.process_sequences(
                     sequences, max_input_len, eos_token_id, pad_token_id
                 )
                 sequences = sequences.to("cuda")
                 attention_mask = attention_mask.to("cuda")
                 action_mask = action_mask.to("cuda")
+                pixel_values = pixel_values.to("cuda")
+                image_num_patches = image_num_patches.to("cuda")
                 samples_list.append(
                     Samples(
                         sequences=sequences,
                         attention_mask=attention_mask,
                         action_mask=action_mask,
+                        pixel_values=pixel_values,
+                        image_num_patches=image_num_patches,
                         num_actions=action_mask.size(1),
                         packed_seq_lens=None,
                         response_length=action_mask.float().sum(dim=-1),
@@ -814,6 +890,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
 
     def flush(self):
         "Ensure all experience has been send to critic"
+        assert self.critic is None
         if self.critic is not None:
             ray.get(self._ref)
             self._ref = None

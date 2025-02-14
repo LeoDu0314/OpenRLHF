@@ -83,6 +83,8 @@ class ReferenceModelRayActor(BasePPORole):
     def forward(
         self,
         sequences: torch.LongTensor,
+        pixel_values: torch.Tensor,
+        image_flags: torch.LongTensor,
         num_actions: int = None,
         attention_mask: Optional[torch.Tensor] = None,
         return_output=False,
@@ -92,8 +94,10 @@ class ReferenceModelRayActor(BasePPORole):
         with torch.no_grad():
             log_probs = self.model(
                 sequences.to(device),
-                num_actions,
-                attention_mask.to(device),
+                pixel_values.to(device),
+                image_flags.to(device),
+                num_actions=num_actions,
+                attention_mask=attention_mask.to(device),
                 return_output=return_output,
                 packed_seq_lens=packed_seq_lens,
             )

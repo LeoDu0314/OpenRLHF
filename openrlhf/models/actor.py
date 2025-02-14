@@ -5,8 +5,11 @@ import torch.distributed as dist
 import torch.nn as nn
 from peft import LoraConfig, TaskType, get_peft_model
 from peft.tuners.lora import LoraLayer
-from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import AutoTokenizer, BitsAndBytesConfig
 from transformers.integrations.deepspeed import HfDeepSpeedConfig
+
+from openrlhf.internvl import InternVLChatModel
+from openrlhf.internvl.train.constants import IMG_CONTEXT_TOKEN
 
 from .ring_attn_utils import convert_ring_attn_params
 from .utils import log_probs_from_logits, reset_position_ids
@@ -59,6 +62,7 @@ class Actor(nn.Module):
             else:
                 dschf = None
 
+            assert not load_in_4bit
             if load_in_4bit:
                 assert bf16, "we only support bnb_4bit_compute_dtype = bf16"
                 nf4_config = BitsAndBytesConfig(
@@ -70,7 +74,7 @@ class Actor(nn.Module):
             else:
                 nf4_config = None
 
-            self.model = AutoModelForCausalLM.from_pretrained(
+            self.model = InternVLChatModel.from_pretrained(
                 pretrain_or_model,
                 trust_remote_code=True,
                 attn_implementation=attn_implementation,
@@ -78,7 +82,10 @@ class Actor(nn.Module):
                 torch_dtype=torch.bfloat16 if bf16 else "auto",
                 device_map=device_map,
             )
+            tokenizer = AutoTokenizer.from_pretrained(pretrain_or_model, trust_remote_code=True)
+            self.model.img_context_token_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
 
+            assert not lora_rank > 0
             # LoRA
             if lora_rank > 0:
                 # https://github.com/huggingface/peft/issues/137
@@ -183,6 +190,8 @@ class Actor(nn.Module):
     def forward(
         self,
         sequences: torch.LongTensor,
+        pixel_values: torch.Tensor,
+        image_flags: torch.LongTensor,
         num_actions: Optional[Union[int, list[int]]] = None,
         attention_mask: Optional[torch.Tensor] = None,
         return_output=False,
@@ -190,6 +199,7 @@ class Actor(nn.Module):
         packed_seq_lens: Optional[list[int]] = None,
     ) -> torch.Tensor:
         """Returns action log probs"""
+        assert not self.packing_samples
         if not self.packing_samples:
             # https://github.com/OpenRLHF/OpenRLHF/issues/217
             position_ids = attention_mask.long().cumsum(-1) - 1
@@ -205,7 +215,13 @@ class Actor(nn.Module):
             # explicitly ignore attention_mask for packing_samples
             attention_mask = None
 
-        output = self.model(sequences, attention_mask=attention_mask, position_ids=position_ids)
+        output = self.model(
+            pixel_values=pixel_values,
+            input_ids=sequences,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            image_flags=image_flags,
+        )
         # https://github.com/OpenRLHF/OpenRLHF/pull/634
         output["logits"] = output["logits"].to(torch.float32)
 
@@ -215,6 +231,7 @@ class Actor(nn.Module):
 
         log_probs = log_probs_from_logits(output["logits"][:, :-1, :], sequences[:, 1:])
 
+        assert not self.packing_samples
         if not self.packing_samples:
             action_log_probs = log_probs[:, -num_actions:]
         else:

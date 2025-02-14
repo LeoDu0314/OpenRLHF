@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 
 
-from .experience_maker import Experience
+from openrlhf.trainer.ppo_utils import Experience
 
 
 @dataclass
@@ -27,6 +27,8 @@ class BufferItem:
     """
 
     sequences: torch.Tensor
+    pixel_values: torch.Tensor
+    image_num_patches: torch.Tensor
     action_log_probs: torch.Tensor
     values: torch.Tensor
     returns: torch.Tensor
@@ -41,6 +43,7 @@ def split_experience_batch(experience: Experience) -> List[BufferItem]:
     batch_kwargs = [{} for _ in range(batch_size)]
     keys = (
         "sequences",
+        "image_num_patches",
         "action_log_probs",
         "values",
         "returns",
@@ -60,6 +63,13 @@ def split_experience_batch(experience: Experience) -> List[BufferItem]:
         assert batch_size == len(vals)
         for i, v in enumerate(vals):
             batch_kwargs[i][key] = v
+
+    start = 0
+    end = 0
+    for i in range(batch_size):
+        end = start + batch_kwargs[i]["image_num_patches"].sum().item()
+        batch_kwargs[i]["pixel_values"] = experience.pixel_values[start:end]
+        start = end
 
     for i in range(batch_size):
         batch_kwargs[i]["info"] = {}
@@ -91,6 +101,7 @@ def make_experience_batch(items: List[BufferItem], packing_samples=False) -> Exp
     kwargs = {}
     keys = (
         "sequences",
+        "image_num_patches",
         "action_log_probs",
         "values",
         "returns",
@@ -100,11 +111,15 @@ def make_experience_batch(items: List[BufferItem], packing_samples=False) -> Exp
     )
     for key in keys:
         vals = [getattr(item, key) for item in items]
+        assert not packing_samples
         if not packing_samples:
             batch_data = zero_pad_sequences(vals, "left") if vals[0] is not None else None
         else:
             batch_data = vals if vals[0] is not None else None
         kwargs[key] = batch_data
+
+    pixel_values = [getattr(item, "pixel_values") for item in items]
+    kwargs["pixel_values"] = torch.cat(pixel_values, dim=0)
 
     kwargs["info"] = {}
     for key in items[0].info.keys():
@@ -115,8 +130,10 @@ def make_experience_batch(items: List[BufferItem], packing_samples=False) -> Exp
 
 def remove_padding_in_sequences(items):
     for item in items:
-        seq, act_log_prob, value, ret, adv, att_mask, act_mask = (
+        seq, pixel_values, image_num_patches, act_log_prob, value, ret, adv, att_mask, act_mask = (
             item.sequences,
+            item.pixel_values,
+            item.image_num_patches,
             item.action_log_probs,
             item.values,
             item.returns,
@@ -129,8 +146,11 @@ def remove_padding_in_sequences(items):
 
         # left_pad for seq and att_mask
         left_pad = att_mask.long().argmax()
+        left_pad_image_num_patches = torch.argmax((image_num_patches != 0).long())
         (
             item.sequences,
+            item.pixel_values,
+            item.image_num_patches,
             item.action_log_probs,
             item.values,
             item.returns,
@@ -139,6 +159,8 @@ def remove_padding_in_sequences(items):
             item.action_mask,
         ) = (
             seq[left_pad:right_pad],
+            pixel_values,
+            image_num_patches[left_pad_image_num_patches:],
             act_log_prob[:right_pad],
             value[:right_pad] if item.values is not None else None,
             ret[:right_pad],
@@ -176,6 +198,7 @@ class NaiveReplayBuffer(ABC):
             experience.to_device(torch.device("cpu"))
         items = split_experience_batch(experience)
         # the packed samples comes with no padding
+        assert not self.packing_samples
         if not self.packing_samples:
             items = remove_padding_in_sequences(items)
         self.items.extend(items)

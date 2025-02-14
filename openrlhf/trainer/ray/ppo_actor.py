@@ -297,6 +297,8 @@ class ActorModelRayActor(BasePPORole):
         self.tokenizer = get_tokenizer(
             pretrain, actor.model, "left", strategy, use_fast=not strategy.args.disable_fast_tokenizer
         )
+        self.tokenizer.eos_token = "<|im_end|>"
+        self.tokenizer.eos_token_id = self.tokenizer.convert_tokens_to_ids("<|im_end|>")
 
         if args.enable_ema:
             ema_model = Actor(
@@ -377,7 +379,11 @@ class ActorModelRayActor(BasePPORole):
             prompts_data, self.tokenizer, strategy, input_template=args.input_template
         )
         self.prompts_dataloader = strategy.setup_dataloader(
-            self.prompts_dataset, args.rollout_batch_size // strategy.world_size, True, True
+            self.prompts_dataset,
+            args.rollout_batch_size // strategy.world_size,
+            True,
+            True,
+            collate_fn=lambda batch: batch,
         )
 
         if args.pretrain_data:
