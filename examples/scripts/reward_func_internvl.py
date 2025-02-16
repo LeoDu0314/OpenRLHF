@@ -63,13 +63,17 @@ def reward_func(queries, prompts):
             query = re.sub(r"\s*<IMG_CONTEXT>\s*", "", query)
             query = re.sub(r"<img>\s*</img>", " <image>", query)
             query = re.sub("</s>", "", query)
-            response = re.search(pattern, query, re.DOTALL).group(1).strip()
+            try:
+                response = re.search(pattern, query, re.DOTALL).group(1).strip()
+            except:
+                response = ""
             answer = prompt["answer"]
 
             accuracy_reward, completion_match = accuracy_reward_func(response, answer)
             format_reward = format_reward_func(response)
+            reward = (accuracy_reward + format_reward) / 2
 
-            rewards.append(accuracy_reward + 0.5 * format_reward)
+            rewards.append(reward)
             accuracy_rewards.append(accuracy_reward)
             format_rewards.append(format_reward)
             f.write(f"===============================================================\n")
