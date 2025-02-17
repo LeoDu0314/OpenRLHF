@@ -65,13 +65,15 @@ def reward_func(queries, prompts):
             query = re.sub("</s>", "", query)
             try:
                 response = re.search(pattern, query, re.DOTALL).group(1).strip()
-            except:
-                response = ""
-            answer = prompt["answer"]
+                answer = prompt["answer"]
 
-            accuracy_reward, completion_match = accuracy_reward_func(response, answer)
-            format_reward = format_reward_func(response)
-            reward = (accuracy_reward + format_reward) / 2
+                accuracy_reward, completion_match = accuracy_reward_func(response, answer)
+                format_reward = format_reward_func(response)
+                reward = (accuracy_reward + format_reward) / 2
+            except:
+                accuracy_reward = 0.0
+                format_reward = 0.0
+                reward = 0.0
 
             rewards.append(reward)
             accuracy_rewards.append(accuracy_reward)
