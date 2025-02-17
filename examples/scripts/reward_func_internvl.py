@@ -60,10 +60,10 @@ def reward_func(queries, prompts):
     with open(LOG_PATH, "a") as f:
         f.write(f"----------------------------- {current_time} -----------------------------\n")
         for query, prompt in zip(queries, prompts):
-            query = re.sub(r"\s*<IMG_CONTEXT>\s*", "", query)
-            query = re.sub(r"<img>\s*</img>", " <image>", query)
-            query = re.sub("</s>", "", query)
             try:
+                query = re.sub(r"\s*<IMG_CONTEXT>\s*", "", query)
+                query = re.sub(r"<img>\s*</img>", " <image>", query)
+                query = re.sub("</s>", "", query)
                 response = re.search(pattern, query, re.DOTALL).group(1).strip()
                 answer = prompt["answer"]
 
