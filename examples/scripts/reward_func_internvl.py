@@ -74,6 +74,7 @@ def reward_func(queries, prompts):
                 accuracy_reward = 0.0
                 format_reward = 0.0
                 reward = 0.0
+                completion_match = []
 
             rewards.append(reward)
             accuracy_rewards.append(accuracy_reward)
