@@ -10,15 +10,25 @@ LOG_PATH = os.environ.get("REWARD_LOG_PATH", "reward.log")
 
 
 def accuracy_reward_func(completion, answer):
-    # completion = completion.split("\n")[-1]
+    answers = [
+        answer,
+        answer.removeprefix("\\boxed{").removesuffix("}"),
+        answer.removeprefix("$$").removesuffix("$$"),
+        answer.replace(" ", ""),
+        answer.replace(" ", "").removeprefix("\\boxed{").removesuffix("}"),
+        answer.replace(" ", "").removeprefix("$$").removesuffix("$$"),
+    ]
     completion_match = regex.findall(
         r"(\\boxed\{(?:[^{}]+|(?P<BRACES>\{(?:[^{}]+|(?P>BRACES))*\}))*\})", completion, re.DOTALL
     )
     completion = completion_match[-1][0].strip() if completion_match else completion.strip()
+    completion_raw = completion.removeprefix("\\boxed{").removesuffix("}")
 
     reward = 0.0
 
-    if completion == answer:
+    if completion in answers or completion.replace(" ", "") in answers:
+        reward = 1.0
+    elif completion_raw in answers or completion_raw.replace(" ", "") in answers:
         reward = 1.0
     else:
         try:
@@ -29,7 +39,13 @@ def accuracy_reward_func(completion, answer):
                 completion,
                 extraction_config=[StringExtractionConfig(), LatexExtractionConfig(), ExprExtractionConfig()],
             )
+            completion_raw = parse(
+                completion_raw,
+                extraction_config=[StringExtractionConfig(), LatexExtractionConfig(), ExprExtractionConfig()],
+            )
             if verify(answer, completion):
+                reward = 1.0
+            elif verify(answer, completion_raw):
                 reward = 1.0
         except:
             pass
