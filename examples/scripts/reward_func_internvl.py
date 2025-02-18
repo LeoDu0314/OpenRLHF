@@ -70,7 +70,8 @@ def reward_func(queries, prompts):
                 accuracy_reward, completion_match = accuracy_reward_func(response, answer)
                 format_reward = format_reward_func(response)
                 reward = (accuracy_reward + format_reward) / 2
-            except:
+            except Exception as e:
+                print("Error in reward_func: ", e)
                 accuracy_reward = 0.0
                 format_reward = 0.0
                 reward = 0.0
