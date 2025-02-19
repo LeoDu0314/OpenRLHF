@@ -554,7 +554,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
             if torch.distributed.get_rank() == 0:
                 refs = []
                 for engine in self.vllm_engines:
-                    refs.append(engine.sleep.remote())
+                    refs.append(engine.sleep.remote(level=2))
                 ray.get(refs)
         return samples
 
