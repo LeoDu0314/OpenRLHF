@@ -57,7 +57,7 @@ class LLMRayActor:
     def reset_prefix_cache(self):
         self.llm.llm_engine.reset_prefix_cache()
 
-    def sleep(self, level=2):
+    def sleep(self, level=1):
         self.llm.sleep(level=level)
 
     def wake_up(self):
