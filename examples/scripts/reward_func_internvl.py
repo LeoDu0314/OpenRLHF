@@ -13,10 +13,7 @@ def accuracy_reward_func(completion, answer):
     answers = [
         answer,
         answer.removeprefix("\\boxed{").removesuffix("}"),
-        answer.removeprefix("$$").removesuffix("$$"),
-        answer.replace(" ", ""),
-        answer.replace(" ", "").removeprefix("\\boxed{").removesuffix("}"),
-        answer.replace(" ", "").removeprefix("$$").removesuffix("$$"),
+        answer.removeprefix("$$").removeprefix("$").removesuffix("$$").removesuffix("$"),
     ]
     completion_match = regex.findall(
         r"(\\boxed\{(?:[^{}]+|(?P<BRACES>\{(?:[^{}]+|(?P>BRACES))*\}))*\})", completion, re.DOTALL
@@ -26,9 +23,9 @@ def accuracy_reward_func(completion, answer):
 
     reward = 0.0
 
-    if completion in answers or completion.replace(" ", "") in answers:
+    if completion in answers:
         reward = 1.0
-    elif completion_raw in answers or completion_raw.replace(" ", "") in answers:
+    elif completion_raw in answers:
         reward = 1.0
     else:
         try:
