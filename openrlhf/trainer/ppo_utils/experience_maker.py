@@ -769,19 +769,15 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
         )
 
         # Expand prompt list based on the number of samples per prompt
-        all_prompt_inputs = []
-        for prompt in all_prompts:
-            if "image_urls" in prompt:
-                all_prompt_inputs.append(
-                    {
-                        "prompt": prompt["prompt"],
-                        "multi_modal_data": {
-                            "image": [connector.fetch_image(image_url) for image_url in prompt["image_urls"]]
-                        },
-                    }
-                )
-            else:
-                all_prompt_inputs.append({"prompt": prompt["prompt"]})
+        all_prompt_inputs = [
+            {
+                "prompt": prompt["prompt"],
+                "multi_modal_data": {
+                    "image": [connector.fetch_image(image_url) for image_url in prompt["image_urls"]]
+                },
+            }
+            for prompt in all_prompts
+        ]
         all_prompts = sum([[prompt] * args.n_samples_per_prompt for prompt in all_prompts], [])
         all_prompt_inputs = sum(
             [[prompt_inputs] * args.n_samples_per_prompt for prompt_inputs in all_prompt_inputs], []
