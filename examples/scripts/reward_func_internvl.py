@@ -68,7 +68,7 @@ def reward_func(queries, prompts):
     rewards = []
     accuracy_rewards = []
     format_rewards = []
-    pattern = r"<\|im_start\|> assistant(.*?)<\|im_end\|>"
+    pattern = r"<\|im_start\|>\s*assistant(.*?)<\|im_end\|>"
 
     with open(LOG_PATH, "a") as f:
         f.write(f"----------------------------- {current_time} -----------------------------\n")
