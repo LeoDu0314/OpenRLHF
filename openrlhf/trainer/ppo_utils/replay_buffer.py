@@ -17,6 +17,7 @@ class BufferItem:
     Shapes of each tensor:
     sequences: (S)
     action_log_probs: (A)
+    base_action_log_probs: (A)
     values: (1)
     returns: (1)
     advantages: (1)
@@ -30,6 +31,7 @@ class BufferItem:
     pixel_values: torch.Tensor
     image_num_patches: torch.Tensor
     action_log_probs: torch.Tensor
+    base_action_log_probs: torch.Tensor
     values: torch.Tensor
     returns: torch.Tensor
     advantages: torch.Tensor
@@ -45,6 +47,7 @@ def split_experience_batch(experience: Experience) -> List[BufferItem]:
         "sequences",
         "image_num_patches",
         "action_log_probs",
+        "base_action_log_probs",
         "values",
         "returns",
         "advantages",
@@ -103,6 +106,7 @@ def make_experience_batch(items: List[BufferItem], packing_samples=False) -> Exp
         "sequences",
         "image_num_patches",
         "action_log_probs",
+        "base_action_log_probs",
         "values",
         "returns",
         "advantages",
@@ -130,11 +134,12 @@ def make_experience_batch(items: List[BufferItem], packing_samples=False) -> Exp
 
 def remove_padding_in_sequences(items):
     for item in items:
-        seq, pixel_values, image_num_patches, act_log_prob, value, ret, adv, att_mask, act_mask = (
+        seq, pixel_values, image_num_patches, act_log_prob, base_act_log_prob, value, ret, adv, att_mask, act_mask = (
             item.sequences,
             item.pixel_values,
             item.image_num_patches,
             item.action_log_probs,
+            item.base_action_log_probs,
             item.values,
             item.returns,
             item.advantages,
@@ -152,6 +157,7 @@ def remove_padding_in_sequences(items):
             item.pixel_values,
             item.image_num_patches,
             item.action_log_probs,
+            item.base_action_log_probs,
             item.values,
             item.returns,
             item.advantages,
@@ -162,6 +168,7 @@ def remove_padding_in_sequences(items):
             pixel_values,
             image_num_patches[left_pad_image_num_patches:],
             act_log_prob[:right_pad],
+            base_act_log_prob[:right_pad] if item.base_action_log_probs is not None else None,
             value[:right_pad] if item.values is not None else None,
             ret[:right_pad],
             adv[:right_pad],
