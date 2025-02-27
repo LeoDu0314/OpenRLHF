@@ -404,10 +404,11 @@ class NaiveExperienceMaker(ABC):
             if args.accuracy_lower_bound <= reward.item() <= args.accuracy_upper_bound:
                 filtered_experiences.extend(group)
 
-        print(f"Filtered {len(experiences) - len(filtered_experiences)} experiences.")
         if not filtered_experiences:
-            print("No experiences left after filtering, random sample one")
-            filtered_experiences = [experiences[0]]
+            print("No experiences left after filtering, abort filtering")
+            filtered_experiences = experiences
+        else:
+            print(f"Filtered {len(experiences) - len(filtered_experiences)} experiences.")
 
         return filtered_experiences
 
