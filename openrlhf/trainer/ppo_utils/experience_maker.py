@@ -405,6 +405,10 @@ class NaiveExperienceMaker(ABC):
                 filtered_experiences.extend(group)
 
         print(f"Filtered {len(experiences) - len(filtered_experiences)} experiences.")
+        if not filtered_experiences:
+            print("No experiences left after filtering, random sample one")
+            filtered_experiences = [experiences[0]]
+
         return filtered_experiences
 
     @torch.no_grad()
