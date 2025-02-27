@@ -395,6 +395,10 @@ if __name__ == "__main__":
     # ModelScope parameters
     parser.add_argument("--use_ms", action="store_true", default=False)
 
+    # Filter parameters
+    parser.add_argument("--accuracy_lower_bound", type=float, default=0.0, help="Lower bound for accuracy")
+    parser.add_argument("--accuracy_upper_bound", type=float, default=1.0, help="Upper bound for accuracy")
+
     args = parser.parse_args()
 
     if args.advantage_estimator not in ["gae"]:

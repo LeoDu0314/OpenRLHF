@@ -1,5 +1,6 @@
 import time
 from abc import ABC
+from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -216,6 +217,8 @@ class NaiveExperienceMaker(ABC):
         ):
             experiences.append(self.make_experience(samples).to_device("cpu"))
 
+        experiences = self.filter(experiences)
+
         experiences, rewards = self.process_experiences(experiences)
 
         # calculate return and advantages
@@ -376,6 +379,33 @@ class NaiveExperienceMaker(ABC):
             info,
             kl,
         )
+
+    @torch.no_grad()
+    def filter(self, experiences: List[Experience]) -> List[Experience]:
+        """
+        Filter experiences based on accuracy reward.
+
+        Output:
+        - experiences: List of filtered Experience
+        """
+
+        args = self.strategy.args
+        accuracy_rewards = torch.cat([experience.info["accuracy_reward"] for experience in experiences])
+        accuracy_rewards = accuracy_rewards.reshape(-1, args.n_samples_per_prompt).to(device="cuda")
+        accuracy_rewards = torch.mean(accuracy_rewards, dim=-1)
+        accuracy_counts = Counter(accuracy_rewards.tolist())
+        print("Accuracy distribution:", " ".join(f"{k:.2f}:{v}" for k, v in sorted(accuracy_counts.items())))
+
+        assert len(experiences) % len(accuracy_rewards) == 0
+        group_len = len(experiences) // len(accuracy_rewards)
+        grouped_experience = [experiences[i : i + group_len] for i in range(0, len(experiences), group_len)]
+        filtered_experiences = []
+        for group, reward in zip(grouped_experience, accuracy_rewards):
+            if args.accuracy_lower_bound <= reward.item() <= args.accuracy_upper_bound:
+                filtered_experiences.extend(group)
+
+        print(f"Filtered {len(experiences) - len(filtered_experiences)} experiences.")
+        return filtered_experiences
 
     @torch.no_grad()
     def process_experiences(self, experiences: List[Experience]) -> Tuple[List[Experience], List[torch.Tensor]]:
