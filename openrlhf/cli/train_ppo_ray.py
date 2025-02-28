@@ -396,6 +396,8 @@ if __name__ == "__main__":
     parser.add_argument("--use_ms", action="store_true", default=False)
 
     # Filter parameters
+    parser.add_argument("--enable_accuracy_filter", action="store_true", default=False)
+    parser.add_argument("--freezing_filter_steps", type=int, default=-1)
     parser.add_argument("--accuracy_lower_bound", type=float, default=0.0, help="Lower bound for accuracy")
     parser.add_argument("--accuracy_upper_bound", type=float, default=1.0, help="Upper bound for accuracy")
 

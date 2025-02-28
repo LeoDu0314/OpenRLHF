@@ -195,7 +195,7 @@ class NaiveExperienceMaker(ABC):
 
     @torch.no_grad()
     def make_experience_list(
-        self, all_prompts: Union[Dict[str, Any], List[Dict[str, Any]]], **generate_kwargs
+        self, all_prompts: Union[Dict[str, Any], List[Dict[str, Any]]], global_step, **generate_kwargs
     ) -> List[Experience]:
         """
         Make a list of experience with the micro_rollout_batch_size.
@@ -217,7 +217,8 @@ class NaiveExperienceMaker(ABC):
         ):
             experiences.append(self.make_experience(samples).to_device("cpu"))
 
-        experiences = self.filter(experiences)
+        if args.enable_accuracy_filter and global_step > args.freezing_filter_steps:
+            experiences = self.filter(experiences)
 
         experiences, rewards = self.process_experiences(experiences)
 
@@ -561,7 +562,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
 
     @torch.no_grad()
     def make_experience_list(
-        self, all_prompts: Union[Dict[str, Any], List[Dict[str, Any]]], **generate_kwargs
+        self, all_prompts: Union[Dict[str, Any], List[Dict[str, Any]]], global_step, **generate_kwargs
     ) -> List[Experience]:
         if self.strategy.args.perf:
             self.perf_stats = {
@@ -569,7 +570,7 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
                 "actor_value_rm_time": 0,
                 "wait_time": 0,
             }
-        experiences = super().make_experience_list(all_prompts, **generate_kwargs)
+        experiences = super().make_experience_list(all_prompts, global_step, **generate_kwargs)
         assert self.critic is None
         if self.critic is not None:
             for experience in experiences:
