@@ -1,13 +1,20 @@
+import itertools
 import random
 from abc import ABC
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 
-
 from openrlhf.trainer.ppo_utils import Experience
+
+
+def to(tensor: Union[torch.Tensor, list[torch.Tensor]], device):
+    if isinstance(tensor, list):
+        return [to(t, device) for t in tensor]
+    return tensor.to(device) if isinstance(tensor, torch.Tensor) else tensor
 
 
 @dataclass
@@ -38,6 +45,21 @@ class BufferItem:
     attention_mask: Optional[torch.LongTensor]
     action_mask: Optional[torch.BoolTensor]
     info: Optional[dict]
+
+    @torch.no_grad()
+    def to_device(self, device: torch.device):
+        self.sequences = to(self.sequences, device)
+        self.pixel_values = to(self.pixel_values, device)
+        self.image_num_patches = to(self.image_num_patches, device)
+        self.action_log_probs = to(self.action_log_probs, device)
+        self.base_action_log_probs = to(self.base_action_log_probs, device)
+        self.values = to(self.values, device)
+        self.returns = to(self.returns, device)
+        self.advantages = to(self.advantages, device)
+        self.attention_mask = to(self.attention_mask, device)
+        self.action_mask = to(self.action_mask, device)
+        self.info = {key: to(value, device) for key, value in self.info.items()}
+        return self
 
 
 def split_experience_batch(experience: Experience) -> List[BufferItem]:
@@ -198,6 +220,7 @@ class NaiveReplayBuffer(ABC):
         self.packing_samples = packing_samples
         self.target_device = torch.device(f"cuda:{torch.cuda.current_device()}")
         self.items: List[BufferItem] = []
+        self.gathered = False
 
     @torch.no_grad()
     def append(self, experience: Experience) -> None:
@@ -216,6 +239,16 @@ class NaiveReplayBuffer(ABC):
 
     def clear(self) -> None:
         self.items.clear()
+        self.gathered = False
+
+    def all_gather(self):
+        all_items: list[list[BufferItem]] = [None] * dist.get_world_size()  # type: ignore
+        dist.all_gather_object(all_items, self.items)
+        self.items = [
+            item.to_device(self.target_device) if not self.cpu_offload else item
+            for item in itertools.chain.from_iterable(all_items)
+        ]
+        self.gathered = True
 
     @torch.no_grad()
     def sample(self) -> Experience:
@@ -255,12 +288,16 @@ class NaiveReplayBuffer(ABC):
 
         # for DP
         # mean
-        sum_and_count = torch.tensor([items_vector.sum(), num_actions], device=items_vector.device)
-        all_sum, all_count = strategy.all_reduce(sum_and_count, "sum")
+        sum_and_count = (items_vector.sum(), num_actions)
+        all_sum, all_count = (
+            strategy.all_reduce(torch.tensor(sum_and_count, device=items_vector.device), "sum")
+            if not self.gathered
+            else sum_and_count
+        )
         mean = all_sum / all_count
         # std
         std = ((items_vector - mean).pow(2) * action_masks_vector).sum()
-        all_std = strategy.all_reduce(std, "sum")
+        all_std = strategy.all_reduce(std, "sum") if not self.gathered else std
         rstd = (all_std / all_count).clamp(min=1e-8).rsqrt()
 
         for i, item in enumerate(self):
