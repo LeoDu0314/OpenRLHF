@@ -1,4 +1,5 @@
 import itertools
+import math
 import random
 from abc import ABC
 from dataclasses import dataclass
@@ -243,9 +244,16 @@ class NaiveReplayBuffer(ABC):
 
     def all_gather(self, strategy):
         args = strategy.args
-        all_items: list[list[BufferItem]] = [None] * dist.get_world_size()  # type: ignore
-        dist.all_gather_object(all_items, self.items)
-        self.items = [item for item in itertools.chain.from_iterable(all_items)]
+        chunk_size = math.ceil(len(self.items) / args.n_samples_per_prompt)
+        gathered_data = []
+
+        for i in range(args.n_samples_per_prompt):
+            chunk = self.items[i * chunk_size : (i + 1) * chunk_size]
+            all_chunks: list[list[BufferItem]] = [None] * dist.get_world_size()
+            dist.all_gather_object(all_chunks, chunk)
+            gathered_data.extend(list(itertools.chain.from_iterable(all_chunks)))
+
+        self.items = gathered_data
         cutoff = len(self.items) % args.train_batch_size
         if cutoff != 0:
             self.items = self.items[:-cutoff]
