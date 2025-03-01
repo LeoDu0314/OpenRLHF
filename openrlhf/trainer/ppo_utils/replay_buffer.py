@@ -245,10 +245,7 @@ class NaiveReplayBuffer(ABC):
         args = strategy.args
         all_items: list[list[BufferItem]] = [None] * dist.get_world_size()  # type: ignore
         dist.all_gather_object(all_items, self.items)
-        self.items = [
-            item.to_device(self.target_device) if not self.cpu_offload else item
-            for item in itertools.chain.from_iterable(all_items)
-        ]
+        self.items = [item for item in itertools.chain.from_iterable(all_items)]
         cutoff = len(self.items) % args.train_batch_size
         if cutoff != 0:
             self.items = self.items[:-cutoff]
