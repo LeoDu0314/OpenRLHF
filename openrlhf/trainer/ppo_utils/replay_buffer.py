@@ -250,7 +250,8 @@ class NaiveReplayBuffer(ABC):
             for item in itertools.chain.from_iterable(all_items)
         ]
         cutoff = len(self.items) % args.train_batch_size
-        self.items = self.items[:-cutoff]
+        if cutoff != 0:
+            self.items = self.items[:-cutoff]
 
         self.gathered = True
 
