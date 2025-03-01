@@ -238,7 +238,7 @@ class PPOTrainer(ABC):
                         self.strategy.print(output)
                     self.replay_buffer.append(experience)
 
-                self.replay_buffer.all_gather()
+                self.replay_buffer.all_gather(self.strategy)
                 if self.args.advantage_estimator != "group_norm":
                     self.replay_buffer.normalize("advantages", self.strategy)
                 status = self.ppo_train(steps)
