@@ -823,7 +823,6 @@ class RemoteExperienceMaker(NaiveExperienceMaker):
             skip_special_tokens=kwargs.get("skip_special_tokens", False),
             include_stop_str_in_output=True,
             stop_token_ids=[kwargs.get("eos_token_id", self.tokenizer.eos_token_id)],
-            bad_words=kwargs.get("bad_words", ["<IMG_CONTEXT>"]),
         )
 
         # Expand prompt list based on the number of samples per prompt
