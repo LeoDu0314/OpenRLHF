@@ -250,6 +250,10 @@ class NaiveExperienceMaker(ABC):
         ):
             experiences.append(self.make_experience(samples).to_device("cpu"))
 
+        for experience in experiences:
+            experience.info["original_accuracy_reward"] = torch.mean(experience.info["accuracy_reward"])
+            experience.info["original_format_reward"] = torch.mean(experience.info["format_reward"])
+            experience.info["original_reward"] = torch.mean(experience.info["reward"])
         if args.enable_accuracy_filter and global_step > args.freezing_filter_steps:
             experiences = self.filter(experiences)
 
@@ -424,10 +428,6 @@ class NaiveExperienceMaker(ABC):
         """
 
         args = self.strategy.args
-        for experience in experiences:
-            experience.info["original_accuracy_reward"] = torch.mean(experience.info["accuracy_reward"])
-            experience.info["original_format_reward"] = torch.mean(experience.info["format_reward"])
-            experience.info["original_reward"] = torch.mean(experience.info["reward"])
         accuracy_rewards = torch.cat([experience.info["accuracy_reward"] for experience in experiences])
         accuracy_rewards = accuracy_rewards.reshape(-1, args.n_samples_per_prompt).to(device="cuda")
         accuracy_rewards = torch.mean(accuracy_rewards, dim=-1)
