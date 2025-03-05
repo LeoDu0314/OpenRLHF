@@ -163,6 +163,8 @@ class ActorPPOTrainer(PPOTrainer):
                 torch.distributed.barrier()
                 torch.cuda.synchronize()
                 self._broadcast_to_vllm()
+                torch.distributed.barrier()
+                torch.cuda.synchronize()
 
                 if self.strategy.args.vllm_enable_sleep:
                     batch_vllm_engine_call(self.vllm_engines, "sleep")
