@@ -43,7 +43,7 @@ Solution:
 {solution}
 --------------------------------
 """
-    question = question_data["query"]
+    question = question_data["question"]
     answer = "\n".join(question_data["final_answer"])
     response = str(question_data["response"])
     prompt = prompt.format(question=question, answer=answer, solution=response)

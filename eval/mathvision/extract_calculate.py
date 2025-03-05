@@ -167,7 +167,12 @@ def build_mathv_gpt4_prompt(question_data):
 Please read the following example.
 Then extract the answer from the model response and type it at the end of the prompt.\n
 """
-    question = question_data["question"]
+    options = ""
+    if len(question_data["options"]) > 0:
+        assert len(question_data["options"]) == 5, question_data
+        if "".join(question_data["options"]) != "ABCDE":
+            options = f"(A) {question_data['options'][0]}\n(B) {question_data['options'][1]}\n(C) {question_data['options'][2]}\n(D) {question_data['options'][3]}\n(E) {question_data['options'][4]}\n"
+    question = f"{question_data['question']}\n{options}"
     response = str(question_data["response"])
     prompt = task_description
     examples = get_gpt4_ICE()

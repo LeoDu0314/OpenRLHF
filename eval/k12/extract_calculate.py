@@ -47,11 +47,12 @@ Solution:
 {solution}
 --------------------------------
 """
-    question = question_data["query"]
     if "std_ans_w_latex_en" in question_data:
+        question = re.sub(r"!\[[^\[\]]*\]\([^\(\)]*\)", "", question_data["q_main_w_latex_en"]).strip()
         answer = re.sub(r"!\[[^\[\]]*\]\([^\(\)]*\)", "", "".join(question_data["std_ans_w_latex_en"])).strip()
         answer_detail = re.sub(r"!\[[^\[\]]*\]\([^\(\)]*\)", "", question_data["answer_detail_w_latex_en"]).strip()
     else:
+        question = re.sub(r"!\[[^\[\]]*\]\([^\(\)]*\)", "", question_data["q_main_en"]).strip()
         answer = re.sub(r"!\[[^\[\]]*\]\([^\(\)]*\)", "", "".join(question_data["std_ans_en"])).strip()
         answer_detail = re.sub(r"!\[[^\[\]]*\]\([^\(\)]*\)", "", question_data["answer_detail_en"]).strip()
     response = str(question_data["response"])
