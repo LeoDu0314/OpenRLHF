@@ -117,6 +117,12 @@ if __name__ == "__main__":
     parser.add_argument("--datasets", type=str, default="math_tiankong_test")
     parser.add_argument("--out-dir", type=str, default="results")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--prompt_template",
+        type=str,
+        choices=["original", "reasoning_instruct", "reasoning_pretrain"],
+        default="original",
+    )
     args = parser.parse_args()
 
     if not os.path.exists(args.out_dir):
