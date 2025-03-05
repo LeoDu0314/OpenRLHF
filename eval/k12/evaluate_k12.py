@@ -54,7 +54,7 @@ def evaluate_chat_model():
                         "role": "system",
                         "content": "你是书生·万象，英文名是InternVL，是由上海人工智能实验室、清华大学及多家合作单位联合开发的多模态大语言模型。",
                     },
-                    {"role": "user", "content": data_item["query"]},
+                    {"role": "user", "content": "<image>\n" + question},
                 ]
             elif args.prompt_template == "reasoning_instruct":
                 messages = [
