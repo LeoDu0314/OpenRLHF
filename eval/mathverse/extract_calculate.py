@@ -11,14 +11,16 @@ import pandas as pd
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
-def get_chat_response(prompt, model="gpt-4o", max_token=256, retry=5):
+def get_chat_response(prompt, model="gpt-4o", max_token=256, retry=5, temperature=None):
     messages = [
         {"role": "user", "content": prompt},
     ]
     for i in range(retry):
+        if temperature is None:
+            temperature = 0.5 * i
         try:
             completion = openai.chat.completions.create(
-                model=model, messages=messages, temperature=0.5 * i, max_tokens=max_token
+                model=model, messages=messages, temperature=temperature, max_tokens=max_token
             )
             prediction = completion.choices[0].message.content.strip()
             if prediction != "" and prediction is not None:
