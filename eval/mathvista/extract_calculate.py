@@ -190,7 +190,7 @@ def post_check(question_data, prefetch=False):
         return False
 
 
-def extract_answer(response, problem):
+def extract_answer(problem):
     prompt = build_mathvista_gpt4_prompt(problem)
     if post_check(problem, prefetch=True):
         res = post_check(problem, prefetch=True)
@@ -264,9 +264,7 @@ if __name__ == "__main__":
     print("Number of testing problems:", len(test_ids))
 
     with ThreadPoolExecutor(max_workers=32) as executor:
-        futures = [
-            executor.submit(extract_answer, results[sample_id][label], results[sample_id]) for sample_id in test_ids
-        ]
+        futures = [executor.submit(extract_answer, results[sample_id]) for sample_id in test_ids]
 
         for future in as_completed(futures):
             extraction, id = future.result()

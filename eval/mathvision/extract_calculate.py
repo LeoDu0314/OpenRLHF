@@ -273,9 +273,7 @@ if __name__ == "__main__":
     print("Number of testing problems:", len(test_ids))
 
     with ThreadPoolExecutor(max_workers=32) as executor:
-        futures = [
-            executor.submit(extract_answer, results[sample_id][label], results[sample_id]) for sample_id in test_ids
-        ]
+        futures = [executor.submit(extract_answer, results[sample_id]) for sample_id in test_ids]
 
         for future in as_completed(futures):
             extraction, id = future.result()
