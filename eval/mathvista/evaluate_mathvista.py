@@ -84,7 +84,7 @@ def evaluate_chat_model():
         json.dump(temp, open(output_path, "w", encoding="utf-8"), indent=4, ensure_ascii=False)
         print("Results saved to {}".format(output_path))
 
-        cmd = f"python eval/mathvista/extract_calculate.py --output_file {results_file}"
+        cmd = f"python mathvista/extract_calculate.py --output_file {results_file}"
         print(cmd)
         os.system(cmd)
 
